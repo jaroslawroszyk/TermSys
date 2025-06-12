@@ -28,18 +28,23 @@ Inspired by tools like `htop`, but focused on responsiveness, safety, and rich U
 ## 📸 Screenshots
 
 ### Main Interface
+
 ![Main view](assets/app_view.png)
 
 ### Search Functionality
+
 ![Search](assets/search.png)
 
 ### Kill Modal
+
 ![Kill Modal](assets/kill.png)
 
 ### Kill by PID
+
 ![Kill by pid](assets/killbypid.png)
 
 ### Detailed Process View
+
 ![Details](assets/details.png)
 
 ### Prerequisites
