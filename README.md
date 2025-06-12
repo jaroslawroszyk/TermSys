@@ -25,7 +25,22 @@ Inspired by tools like `htop`, but focused on responsiveness, safety, and rich U
 - **System Info Panel** – memory, swap, uptime
 - **Keyboard Shortcuts** for fast interaction
 
-## Getting Started
+## 📸 Screenshots
+
+### Main Interface
+![Main view](assets/app_view.png)
+
+### Search Functionality
+![Search](assets/search.png)
+
+### Kill Modal
+![Kill Modal](assets/kill.png)
+
+### Kill by PID
+![Kill by pid](assets/killbypid.png)
+
+### Detailed Process View
+![Details](assets/details.png)
 
 ### Prerequisites
 
@@ -40,17 +55,9 @@ cd terminal-process-manager
 cargo run --release
 ````
 
-### Optional
-
-Install globally:
-
-```bash
-cargo install --path .
-```
-
 ---
 
-## 🎮 Keyboard Shortcuts
+## Keyboard Shortcuts
 
 | Key         | Action                                    |
 | ----------- | ----------------------------------------- |
