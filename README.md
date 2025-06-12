@@ -1,4 +1,4 @@
-# 🧠 Terminal Process Manager
+# Terminal Process Manager
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-stable-blue)
@@ -9,23 +9,23 @@ Inspired by tools like `htop`, but focused on responsiveness, safety, and rich U
 
 ---
 
-## ✨ Features
+## Features
 
-- 🔍 **Live Search** – filter processes by name, PID, or CPU usage
-- 📊 **Process Table** – sorted by CPU usage, auto-refreshed
-- 💀 **Kill Process**
+- **Live Search** – filter processes by name, PID, or CPU usage
+- **Process Table** – sorted by CPU usage, auto-refreshed
+- **Kill Process**
   - Select from list and send `SIGTERM` or `SIGKILL`
   - Enter PID manually
-- 🐭 **Mouse Support**
+- **Mouse Support**
   - Click to select a process
   - Scroll with the mouse wheel
-- 📋 **Process Details Panel**
+- **Process Details Panel**
   - Executable path, command, working directory
   - Memory usage, disk I/O, start time
-- 🧠 **System Info Panel** – memory, swap, uptime
-- ⌨️ **Keyboard Shortcuts** for fast interaction
+- **System Info Panel** – memory, swap, uptime
+- **Keyboard Shortcuts** for fast interaction
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -65,29 +65,8 @@ cargo install --path .
 
 ---
 
-## 🧪 Development
 
-To run with debug output:
-
-```bash
-RUST_LOG=debug cargo run
-```
-
-To format code:
-
-```bash
-cargo fmt
-```
-
-To run Clippy (lint):
-
-```bash
-cargo clippy
-```
-
----
-
-## 📦 Dependencies
+## Dependencies
 
 - [ratatui](https://docs.rs/ratatui) – TUI rendering
 - [crossterm](https://docs.rs/crossterm) – terminal input/output
@@ -97,19 +76,11 @@ cargo clippy
 
 ---
 
-## 🛡 License
+##  License
 
 This project is licensed under the MIT License. See [`LICENSE`](LICENSE) for details.
 
----
-
-## 👨‍💻 Author
-
-Created with 🦀 by [Your Name](https://github.com/your-username)
-
----
-
-## 🙏 Acknowledgements
+## Acknowledgements
 
 - `htop` – for UI inspiration
 - `ratatui` community – for great terminal UI ecosystem

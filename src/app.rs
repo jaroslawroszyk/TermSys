@@ -12,7 +12,6 @@ use ratatui::{
 use sysinfo::Signal;
 use sysinfo::{ProcessesToUpdate, System};
 use tui_textarea::TextArea;
-// use nix::unistd::Pid as UnixPid;
 
 #[derive(Debug, Default)]
 pub struct App {
@@ -238,17 +237,20 @@ impl App {
             let processes: Vec<_> = self.system.processes().iter().collect();
             if selected < processes.len() {
                 let (pid, process) = processes[selected];
-                
+
                 // Get detailed process information
-                let exe = process.exe()
+                let exe = process
+                    .exe()
                     .map(|p| format!("{:?}", p))
                     .unwrap_or_else(|| "Unknown".to_string());
-                let cmd = process.cmd()
+                let cmd = process
+                    .cmd()
                     .iter()
                     .map(|s| s.to_string_lossy())
                     .collect::<Vec<_>>()
                     .join(" ");
-                let cwd = process.cwd()
+                let cwd = process
+                    .cwd()
                     .map(|p| format!("{:?}", p))
                     .unwrap_or_else(|| "Unknown".to_string());
                 let disk_usage = process.disk_usage();
