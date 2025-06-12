@@ -1,14 +1,17 @@
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
     widgets::{Block, Clear, Row, Table, TableState},
     DefaultTerminal, Frame,
 };
+use sysinfo::Signal;
 use sysinfo::{ProcessesToUpdate, System};
 use tui_textarea::TextArea;
-use sysinfo::Signal;
 // use nix::unistd::Pid as UnixPid;
 
 #[derive(Debug, Default)]
@@ -23,6 +26,7 @@ pub struct App {
     kill_pid: Option<sysinfo::Pid>,
     kill_by_pid_modal: bool,
     kill_by_pid_input: String,
+    process_list_area: Rect,
 }
 
 impl App {
@@ -42,6 +46,7 @@ impl App {
             kill_pid: None,
             kill_by_pid_modal: false,
             kill_by_pid_input: String::new(),
+            process_list_area: Rect::default(),
         }
     }
 
@@ -107,6 +112,9 @@ impl App {
         }
 
         self.render_footer(frame, footer);
+
+        // Store the process list area for mouse handling
+        self.process_list_area = third;
     }
 
     fn render_process_details(&mut self, frame: &mut Frame<'_>, area: Rect) {
@@ -189,7 +197,8 @@ impl App {
 
     fn render_kill_modal(&self, frame: &mut Frame<'_>, area: Rect) {
         use ratatui::widgets::Paragraph;
-        let text = "Select signal to send:\n[1] SIGTERM (graceful)\n[2] SIGKILL (force)\n[Esc] Cancel";
+        let text =
+            "Select signal to send:\n[1] SIGTERM (graceful)\n[2] SIGKILL (force)\n[Esc] Cancel";
         let modal_area = Rect {
             x: area.x + area.width / 4,
             y: area.y + area.height / 4,
@@ -197,8 +206,7 @@ impl App {
             height: 7,
         };
         frame.render_widget(Clear, modal_area);
-        let paragraph = Paragraph::new(text)
-            .block(Block::bordered().title("Kill process"));
+        let paragraph = Paragraph::new(text).block(Block::bordered().title("Kill process"));
         frame.render_widget(paragraph, modal_area);
     }
 
@@ -215,17 +223,15 @@ impl App {
             height: 6,
         };
         frame.render_widget(Clear, modal_area);
-        let paragraph = Paragraph::new(text)
-            .block(Block::bordered().title("Kill by PID"));
+        let paragraph = Paragraph::new(text).block(Block::bordered().title("Kill by PID"));
         frame.render_widget(paragraph, modal_area);
     }
 
     fn handle_crossterm_events(&mut self) -> Result<()> {
         if event::poll(std::time::Duration::from_millis(16))? {
             match event::read()? {
-                // it's important to check KeyEventKind::Press to avoid handling key release events
                 Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key_event(key),
-                Event::Mouse(_) => {}
+                Event::Mouse(mouse) => self.on_mouse_event(mouse),
                 Event::Resize(_, _) => {}
                 _ => {}
             }
@@ -299,6 +305,67 @@ impl App {
         }
     }
 
+    fn on_mouse_event(&mut self, mouse: MouseEvent) {
+        if self.search || self.kill_modal || self.kill_by_pid_modal {
+            return;
+        }
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if let Some(selected) = self.table_state.selected() {
+                    if selected > 0 {
+                        self.table_state.select(Some(selected - 1));
+                    }
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if let Some(selected) = self.table_state.selected() {
+                    let processes: Vec<_> = self.system.processes().iter().collect();
+                    if selected < processes.len() - 1 {
+                        self.table_state.select(Some(selected + 1));
+                    }
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                // Get the filtered processes first
+                let mut rows: Vec<(sysinfo::Pid, &sysinfo::Process)> = vec![];
+                for (pid, process) in self.system.processes() {
+                    rows.push((*pid, process));
+                }
+                rows.sort_by(|a, b| {
+                    let a_cpu = a.1.cpu_usage();
+                    let b_cpu = b.1.cpu_usage();
+                    b_cpu.partial_cmp(&a_cpu).unwrap()
+                });
+                let text = self.textarea.lines().first().unwrap();
+                let filtered: Vec<_> = rows
+                    .into_iter()
+                    .filter(|(_pid, process)| {
+                        let name = process.name().to_string_lossy().to_string();
+                        let cpu = process.cpu_usage().to_string();
+                        let pid = process.pid().to_string();
+                        [pid, name, cpu]
+                            .iter()
+                            .any(|cell| cell.to_lowercase().contains(&text.to_lowercase()))
+                    })
+                    .collect();
+
+                // Check if click is within the process list area
+                if mouse.column >= self.process_list_area.x && mouse.column < self.process_list_area.x + self.process_list_area.width
+                    && mouse.row >= self.process_list_area.y + 2  // Skip header and border
+                    && mouse.row < self.process_list_area.y + self.process_list_area.height
+                {
+                    // Calculate which row was clicked
+                    let clicked_row = (mouse.row - (self.process_list_area.y + 2)) as usize;
+                    if clicked_row < filtered.len() {
+                        self.table_state.select(Some(clicked_row));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn prepare_kill_modal(&mut self) {
         // Build the same filtered/visible process list as in render_processes
         let mut rows: Vec<(sysinfo::Pid, &sysinfo::Process)> = vec![];
@@ -311,12 +378,17 @@ impl App {
             b_cpu.partial_cmp(&a_cpu).unwrap()
         });
         let text = self.textarea.lines().first().unwrap();
-        let filtered: Vec<_> = rows.into_iter().filter(|(_pid, process)| {
-            let name = process.name().to_string_lossy().to_string();
-            let cpu = process.cpu_usage().to_string();
-            let pid = process.pid().to_string();
-            [pid, name, cpu].iter().any(|cell| cell.to_lowercase().contains(&text.to_lowercase()))
-        }).collect();
+        let filtered: Vec<_> = rows
+            .into_iter()
+            .filter(|(_pid, process)| {
+                let name = process.name().to_string_lossy().to_string();
+                let cpu = process.cpu_usage().to_string();
+                let pid = process.pid().to_string();
+                [pid, name, cpu]
+                    .iter()
+                    .any(|cell| cell.to_lowercase().contains(&text.to_lowercase()))
+            })
+            .collect();
         if let Some(selected) = self.table_state.selected() {
             if selected < filtered.len() {
                 let (pid, _process) = filtered[selected];
@@ -351,4 +423,3 @@ impl App {
         self.running = false;
     }
 }
-
