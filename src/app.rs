@@ -27,6 +27,7 @@ pub struct App {
     kill_by_pid_modal: bool,
     kill_by_pid_input: String,
     process_list_area: Rect,
+    details_panel: bool,
 }
 
 impl App {
@@ -47,6 +48,7 @@ impl App {
             kill_by_pid_modal: false,
             kill_by_pid_input: String::new(),
             process_list_area: Rect::default(),
+            details_panel: false,
         }
     }
 
@@ -111,6 +113,10 @@ impl App {
             self.render_kill_by_pid_modal(frame, third);
         }
 
+        if self.details_panel {
+            self.render_details_panel(frame);
+        }
+
         self.render_footer(frame, footer);
 
         // Store the process list area for mouse handling
@@ -142,7 +148,7 @@ impl App {
     fn render_footer(&self, frame: &mut Frame<'_>, area: Rect) {
         use ratatui::widgets::Paragraph;
         let help =
-            "[q/Esc] Quit  [s] Toggle Search  [j/k] Move  [d] Kill  [p] Kill by PID  [In Search: Esc] Exit Search";
+            "[q/Esc] Quit  [s] Toggle Search  [j/k] Move  [d] Kill  [p] Kill by PID  [Enter] Details  [In Search: Esc] Exit Search  [In Details: Esc] Close";
         let paragraph = Paragraph::new(help).block(Block::bordered().title("Help"));
         frame.render_widget(paragraph, area);
     }
@@ -227,6 +233,74 @@ impl App {
         frame.render_widget(paragraph, modal_area);
     }
 
+    fn render_details_panel(&self, frame: &mut Frame) {
+        if let Some(selected) = self.table_state.selected() {
+            let processes: Vec<_> = self.system.processes().iter().collect();
+            if selected < processes.len() {
+                let (pid, process) = processes[selected];
+                
+                // Get detailed process information
+                let exe = process.exe()
+                    .map(|p| format!("{:?}", p))
+                    .unwrap_or_else(|| "Unknown".to_string());
+                let cmd = process.cmd()
+                    .iter()
+                    .map(|s| s.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let cwd = process.cwd()
+                    .map(|p| format!("{:?}", p))
+                    .unwrap_or_else(|| "Unknown".to_string());
+                let disk_usage = process.disk_usage();
+                let memory = process.memory();
+                let virtual_memory = process.virtual_memory();
+                let start_time = format!("{:?}", process.start_time());
+                let run_time = format!("{:?}", process.run_time());
+                let status = format!("{:?}", process.status());
+
+                let details = format!(
+                    "Process Details for PID {}\n\n\
+                    Executable: {}\n\
+                    Command: {}\n\
+                    Working Directory: {}\n\
+                    Status: {}\n\
+                    Start Time: {}\n\
+                    Run Time: {}s\n\n\
+                    Memory Usage:\n\
+                    - Physical: {} KB\n\
+                    - Virtual: {} KB\n\
+                    - Read: {} bytes\n\
+                    - Written: {} bytes",
+                    pid,
+                    exe,
+                    cmd,
+                    cwd,
+                    status,
+                    start_time,
+                    run_time,
+                    memory,
+                    virtual_memory,
+                    disk_usage.read_bytes,
+                    disk_usage.written_bytes
+                );
+
+                // Create a panel that takes up 80% of the screen width and height
+                let panel_width = (frame.area().width as f32 * 0.8) as u16;
+                let panel_height = (frame.area().height as f32 * 0.8) as u16;
+                let panel_x = (frame.area().width - panel_width) / 2;
+                let panel_y = (frame.area().height - panel_height) / 2;
+
+                let panel_area = Rect::new(panel_x, panel_y, panel_width, panel_height);
+
+                // Clear the area and render the panel
+                frame.render_widget(Clear, panel_area);
+                let paragraph = ratatui::widgets::Paragraph::new(details)
+                    .block(Block::bordered().title("Process Details (Press Esc to close)"));
+                frame.render_widget(paragraph, panel_area);
+            }
+        }
+    }
+
     fn handle_crossterm_events(&mut self) -> Result<()> {
         if event::poll(std::time::Duration::from_millis(16))? {
             match event::read()? {
@@ -240,6 +314,13 @@ impl App {
     }
 
     fn on_key_event(&mut self, key: KeyEvent) {
+        if self.details_panel {
+            if key.code == KeyCode::Esc {
+                self.details_panel = false;
+            }
+            return;
+        }
+
         if self.kill_by_pid_modal {
             match key.code {
                 KeyCode::Esc => {
@@ -300,6 +381,9 @@ impl App {
             (_, KeyCode::Char('p')) => {
                 self.kill_by_pid_modal = true;
                 self.kill_by_pid_input.clear();
+            }
+            (_, KeyCode::Enter) => {
+                self.details_panel = true;
             }
             _ => {}
         }
