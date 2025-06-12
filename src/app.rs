@@ -3,12 +3,13 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
-    symbols,
-    widgets::{Axis, Block, Chart, Clear, Dataset, GraphType, Row, Table, TableState},
+    widgets::{Block, Clear, Row, Table, TableState},
     DefaultTerminal, Frame,
 };
-use sysinfo::ProcessesToUpdate;
+use sysinfo::{ProcessesToUpdate, System};
 use tui_textarea::TextArea;
+use sysinfo::Signal;
+// use nix::unistd::Pid as UnixPid;
 
 #[derive(Debug, Default)]
 pub struct App {
@@ -18,6 +19,10 @@ pub struct App {
     table_state: TableState,
     textarea: TextArea<'static>,
     search: bool,
+    kill_modal: bool,
+    kill_pid: Option<sysinfo::Pid>,
+    kill_by_pid_modal: bool,
+    kill_by_pid_input: String,
 }
 
 impl App {
@@ -33,6 +38,10 @@ impl App {
                 textarea
             },
             search: false,
+            kill_modal: false,
+            kill_pid: None,
+            kill_by_pid_modal: false,
+            kill_by_pid_input: String::new(),
         }
     }
 
@@ -55,48 +64,79 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let [top, second, third] = Layout::vertical([
-            Constraint::Percentage((25)),
+        let [_, second, third, footer] = Layout::vertical([
+            Constraint::Percentage(25),
             Constraint::Fill(1),
             Constraint::Fill(1),
+            Constraint::Length(3),
         ])
         .areas(frame.area());
 
         let [left, right] =
-            Layout::horizontal([Constraint::Percentage((50)), Constraint::Percentage((50))])
+            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .areas(second);
 
-        let datasets = vec![
-            // Scatter chart
-            Dataset::default()
-                .name("data1")
-                .marker(symbols::Marker::Braille)
-                .graph_type(GraphType::Line)
-                .style(Style::default().cyan())
-                .data(&self.cpu),
-        ];
-        let x_axis = Axis::default()
-            .bounds([0f64, self.cpu.len() as f64])
-            .style(Style::default().cyan());
-        let y_axis = Axis::default()
-            .bounds([0f64, 100f64])
-            .style(Style::default().cyan());
-        let chart = Chart::new(datasets)
-            .block(Block::bordered().title("CPU"))
-            .x_axis(x_axis)
-            .y_axis(y_axis);
+        // Left: process details
+        self.render_process_details(frame, left);
 
-        frame.render_widget(Block::bordered(), left);
-        frame.render_widget(Block::bordered(), right);
-
-        frame.render_widget(chart, top);
-        //frame.render_widget(Block::bordered(), second);
+        // Right: show some system info
+        let sys_info = format!(
+            "Total Memory: {} MB\nUsed Memory: {} MB\nTotal Swap: {} MB\nUsed Swap: {} MB\nUptime: {}s",
+            self.system.total_memory() / 1024,
+            self.system.used_memory() / 1024,
+            self.system.total_swap() / 1024,
+            self.system.used_swap() / 1024,
+            System::uptime(),
+        );
+        let info_paragraph = ratatui::widgets::Paragraph::new(sys_info)
+            .block(Block::bordered().title("System Info"));
+        frame.render_widget(info_paragraph, right);
 
         self.render_processes(frame, third);
 
         if self.search {
             self.render_search(frame, third);
         }
+
+        if self.kill_modal {
+            self.render_kill_modal(frame, third);
+        }
+
+        if self.kill_by_pid_modal {
+            self.render_kill_by_pid_modal(frame, third);
+        }
+
+        self.render_footer(frame, footer);
+    }
+
+    fn render_process_details(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        // Show details of the selected process
+        let mut text = String::from("No process selected");
+        if let Some(selected) = self.table_state.selected() {
+            let processes: Vec<_> = self.system.processes().iter().collect();
+            if selected < processes.len() {
+                let (_pid, process) = processes[selected];
+                text = format!(
+                    "PID: {}\nName: {:?}\nCPU: {:.2}%\nMemory: {} KB\nStatus: {:?}",
+                    _pid,
+                    process.name(),
+                    process.cpu_usage(),
+                    process.memory(),
+                    process.status()
+                );
+            }
+        }
+        let paragraph = ratatui::widgets::Paragraph::new(text)
+            .block(Block::bordered().title("Process Details"));
+        frame.render_widget(paragraph, area);
+    }
+
+    fn render_footer(&self, frame: &mut Frame<'_>, area: Rect) {
+        use ratatui::widgets::Paragraph;
+        let help =
+            "[q/Esc] Quit  [s] Toggle Search  [j/k] Move  [d] Kill  [p] Kill by PID  [In Search: Esc] Exit Search";
+        let paragraph = Paragraph::new(help).block(Block::bordered().title("Help"));
+        frame.render_widget(paragraph, area);
     }
 
     fn render_processes(&mut self, frame: &mut Frame<'_>, area: Rect) {
@@ -147,6 +187,39 @@ impl App {
         frame.render_widget(&self.textarea, search_area);
     }
 
+    fn render_kill_modal(&self, frame: &mut Frame<'_>, area: Rect) {
+        use ratatui::widgets::Paragraph;
+        let text = "Select signal to send:\n[1] SIGTERM (graceful)\n[2] SIGKILL (force)\n[Esc] Cancel";
+        let modal_area = Rect {
+            x: area.x + area.width / 4,
+            y: area.y + area.height / 4,
+            width: area.width / 2,
+            height: 7,
+        };
+        frame.render_widget(Clear, modal_area);
+        let paragraph = Paragraph::new(text)
+            .block(Block::bordered().title("Kill process"));
+        frame.render_widget(paragraph, modal_area);
+    }
+
+    fn render_kill_by_pid_modal(&self, frame: &mut Frame<'_>, area: Rect) {
+        use ratatui::widgets::Paragraph;
+        let text = format!(
+            "Enter PID to kill with SIGKILL:\n[{}]\n[Enter] Kill   [Esc] Cancel",
+            self.kill_by_pid_input
+        );
+        let modal_area = Rect {
+            x: area.x + area.width / 4,
+            y: area.y + area.height / 4,
+            width: area.width / 2,
+            height: 6,
+        };
+        frame.render_widget(Clear, modal_area);
+        let paragraph = Paragraph::new(text)
+            .block(Block::bordered().title("Kill by PID"));
+        frame.render_widget(paragraph, modal_area);
+    }
+
     fn handle_crossterm_events(&mut self) -> Result<()> {
         if event::poll(std::time::Duration::from_millis(16))? {
             match event::read()? {
@@ -161,8 +234,46 @@ impl App {
     }
 
     fn on_key_event(&mut self, key: KeyEvent) {
+        if self.kill_by_pid_modal {
+            match key.code {
+                KeyCode::Esc => {
+                    self.kill_by_pid_modal = false;
+                    self.kill_by_pid_input.clear();
+                }
+                KeyCode::Enter => {
+                    self.try_kill_by_pid();
+                    self.kill_by_pid_modal = false;
+                    self.kill_by_pid_input.clear();
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    self.kill_by_pid_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    self.kill_by_pid_input.pop();
+                }
+                _ => {}
+            }
+            return;
+        }
+        if self.kill_modal {
+            match key.code {
+                KeyCode::Char('1') => self.send_signal(Signal::Term),
+                KeyCode::Char('2') => self.send_signal(Signal::Kill),
+                KeyCode::Esc => {
+                    self.kill_modal = false;
+                    self.kill_pid = None;
+                }
+                _ => {}
+            }
+            return;
+        }
         if self.search {
-            self.textarea.input(key);
+            if key.code == KeyCode::Esc {
+                self.search = false;
+            } else {
+                self.textarea.input(key);
+            }
+            return;
         }
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc | KeyCode::Char('q'))
@@ -177,7 +288,62 @@ impl App {
             (_, KeyCode::Char('s')) => {
                 self.search = !self.search;
             }
+            (_, KeyCode::Char('d')) => {
+                self.prepare_kill_modal();
+            }
+            (_, KeyCode::Char('p')) => {
+                self.kill_by_pid_modal = true;
+                self.kill_by_pid_input.clear();
+            }
             _ => {}
+        }
+    }
+
+    fn prepare_kill_modal(&mut self) {
+        // Build the same filtered/visible process list as in render_processes
+        let mut rows: Vec<(sysinfo::Pid, &sysinfo::Process)> = vec![];
+        for (pid, process) in self.system.processes() {
+            rows.push((*pid, process));
+        }
+        rows.sort_by(|a, b| {
+            let a_cpu = a.1.cpu_usage();
+            let b_cpu = b.1.cpu_usage();
+            b_cpu.partial_cmp(&a_cpu).unwrap()
+        });
+        let text = self.textarea.lines().first().unwrap();
+        let filtered: Vec<_> = rows.into_iter().filter(|(_pid, process)| {
+            let name = process.name().to_string_lossy().to_string();
+            let cpu = process.cpu_usage().to_string();
+            let pid = process.pid().to_string();
+            [pid, name, cpu].iter().any(|cell| cell.to_lowercase().contains(&text.to_lowercase()))
+        }).collect();
+        if let Some(selected) = self.table_state.selected() {
+            if selected < filtered.len() {
+                let (pid, _process) = filtered[selected];
+                self.kill_modal = true;
+                self.kill_pid = Some(pid);
+            }
+        }
+    }
+
+    fn send_signal(&mut self, sig: Signal) {
+        if let Some(pid) = self.kill_pid {
+            for (proc_pid, process) in self.system.processes() {
+                if *proc_pid == pid {
+                    let _ = process.kill_with(sig);
+                }
+            }
+        }
+        self.kill_modal = false;
+        self.kill_pid = None;
+    }
+
+    fn try_kill_by_pid(&mut self) {
+        if let Ok(pid_num) = self.kill_by_pid_input.parse::<u32>() {
+            let pid = sysinfo::Pid::from_u32(pid_num);
+            if let Some(process) = self.system.process(pid) {
+                let _ = process.kill_with(Signal::Kill);
+            }
         }
     }
 
@@ -185,3 +351,4 @@ impl App {
         self.running = false;
     }
 }
+
