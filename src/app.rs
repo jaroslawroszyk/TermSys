@@ -39,7 +39,13 @@ impl App {
             table_state: TableState::default(),
             textarea: {
                 let mut textarea = TextArea::default();
-                textarea.set_block(Block::bordered().title("Search"));
+                // textarea.set_block(Block::bordered().title("Search"));
+                textarea.set_block(
+                    Block::default()
+                        .borders(ratatui::widgets::Borders::ALL)
+                        .title("Search (active)")
+                        .style(Style::default().fg(Color::Cyan)),
+                );
                 textarea
             },
             search: false,
@@ -416,7 +422,14 @@ impl App {
             if key.code == KeyCode::Esc {
                 self.search = false;
             } else {
-                self.textarea.input(key);
+                match key.code {
+                    KeyCode::Enter => {
+                        self.search = false;
+                    }
+                    _ => {
+                        self.textarea.input(key);
+                    }
+                }
             }
             return;
         }
