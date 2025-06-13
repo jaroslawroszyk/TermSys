@@ -72,10 +72,9 @@ impl App {
 
     fn draw(&mut self, frame: &mut Frame) {
         // Shift layout down by 1 row, and use the first area for the CPU chart
-        let [cpu_bar, second, third, _, footer] = Layout::vertical([
+        let [cpu_bar, second, third, footer] = Layout::vertical([
             Constraint::Length(8),
             Constraint::Percentage(25),
-            Constraint::Fill(1),
             Constraint::Fill(1),
             Constraint::Length(3),
         ])
@@ -135,6 +134,7 @@ impl App {
             .block(Block::bordered().title("System Info"));
         frame.render_widget(info_paragraph, right);
 
+        // Make process table fill all available space below the panels
         self.render_processes(frame, third);
 
         if self.search {
