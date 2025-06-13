@@ -158,23 +158,34 @@ impl App {
             let name = process.name().to_string_lossy().to_string();
             let cpu = process.cpu_usage();
             let row = vec![pid.to_string(), name, cpu.to_string()];
-            rows.push(row);
+
+            // Create a row with appropriate styling based on process status
+            let style = match process.status() {
+                sysinfo::ProcessStatus::Run => Style::default().fg(Color::Green),
+                sysinfo::ProcessStatus::Sleep => Style::default().fg(Color::Yellow),
+                sysinfo::ProcessStatus::Zombie => Style::default().fg(Color::Red),
+                _ => Style::default(),
+            };
+
+            rows.push((row, style));
         }
 
         rows.sort_by(|a, b| {
-            let a = a[2].parse::<f32>().unwrap_or(0.0);
-            let b = b[2].parse::<f32>().unwrap_or(0.0);
-            b.partial_cmp(&a).unwrap()
+            let a_cpu = a.0[2].parse::<f32>().unwrap_or(0.0);
+            let b_cpu = b.0[2].parse::<f32>().unwrap_or(0.0);
+            b_cpu.partial_cmp(&a_cpu).unwrap()
         });
 
         let text = self.textarea.lines().first().unwrap();
-        rows.retain(|row| {
+        rows.retain(|(row, _)| {
             row.iter()
                 .any(|cell| cell.to_lowercase().contains(&text.to_lowercase()))
         });
 
         let table = Table::new(
-            rows.into_iter().map(Row::new).collect::<Vec<Row>>(),
+            rows.into_iter()
+                .map(|(row, style)| Row::new(row).style(style))
+                .collect::<Vec<Row>>(),
             [
                 Constraint::Max(10),
                 Constraint::Fill(1),
