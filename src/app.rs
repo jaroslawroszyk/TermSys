@@ -6,7 +6,7 @@ use crossterm::event::{
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
-    widgets::{Block, Clear, Row, Table, TableState},
+    widgets::{Axis, Block, Chart, Clear, Dataset, GraphType, Row, Table, TableState},
     DefaultTerminal, Frame,
 };
 use sysinfo::Signal;
@@ -71,13 +71,35 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let [_, second, third, footer] = Layout::vertical([
+        // Shift layout down by 1 row, and use the first area for the CPU chart
+        let [cpu_bar, second, third, _, footer] = Layout::vertical([
+            Constraint::Length(8),
             Constraint::Percentage(25),
             Constraint::Fill(1),
             Constraint::Fill(1),
             Constraint::Length(3),
         ])
         .areas(frame.area());
+
+        // Draw CPU usage line chart at the very top
+        let max_points = cpu_bar.width.min(120) as usize;
+        if self.cpu.len() > max_points {
+            self.cpu.drain(0..self.cpu.len() - max_points);
+        }
+        let cpu_data: Vec<(f64, f64)> = self.cpu.to_vec();
+        let chart = Chart::new(vec![Dataset::default()
+            .name("CPU Usage")
+            .marker(ratatui::symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(Color::Cyan))
+            .data(&cpu_data)])
+        .block(Block::bordered().title("CPU Usage (%)"))
+        .x_axis(Axis::default().bounds([
+            cpu_data.first().map(|(x, _)| *x).unwrap_or(0.0),
+            cpu_data.last().map(|(x, _)| *x).unwrap_or(1.0),
+        ]))
+        .y_axis(Axis::default().bounds([0.0, 100.0]));
+        frame.render_widget(chart, cpu_bar);
 
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
