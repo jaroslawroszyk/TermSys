@@ -12,6 +12,7 @@ use ratatui::{
 use sysinfo::Signal;
 use sysinfo::{ProcessesToUpdate, System};
 use tui_textarea::TextArea;
+use users::get_user_by_uid;
 
 #[derive(Debug, Default)]
 pub struct App {
@@ -86,13 +87,27 @@ impl App {
         self.render_process_details(frame, left);
 
         // Right: show some system info
+        let total_mem_gb = self.system.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
+        let used_mem_gb = self.system.used_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
+        let total_swap_gb = self.system.total_swap() as f64 / 1024.0 / 1024.0 / 1024.0;
+        let used_swap_gb = self.system.used_swap() as f64 / 1024.0 / 1024.0 / 1024.0;
+        let uptime = System::uptime();
+        let days = uptime / 86400;
+        let hours = (uptime % 86400) / 3600;
+        let minutes = (uptime % 3600) / 60;
+        let seconds = uptime % 60;
+        let uptime_str = format!("{:02}d {:02}h {:02}m {:02}s", days, hours, minutes, seconds);
+        let cpu_usage = self.system.global_cpu_usage();
         let sys_info = format!(
-            "Total Memory: {} MB\nUsed Memory: {} MB\nTotal Swap: {} MB\nUsed Swap: {} MB\nUptime: {}s",
-            self.system.total_memory() / 1024,
-            self.system.used_memory() / 1024,
-            self.system.total_swap() / 1024,
-            self.system.used_swap() / 1024,
-            System::uptime(),
+            "System Information\n\
+            ───────────────────────────────\n\
+            CPU Usage    : {:>6.2} %\n\
+            Total Memory : {:>8.2} GB\n\
+            Used Memory  : {:>8.2} GB\n\
+            Total Swap   : {:>8.2} GB\n\
+            Used Swap    : {:>8.2} GB\n\
+            Uptime       : {}",
+            cpu_usage, total_mem_gb, used_mem_gb, total_swap_gb, used_swap_gb, uptime_str
         );
         let info_paragraph = ratatui::widgets::Paragraph::new(sys_info)
             .block(Block::bordered().title("System Info"));
@@ -130,11 +145,11 @@ impl App {
             if selected < processes.len() {
                 let (_pid, process) = processes[selected];
                 text = format!(
-                    "PID: {}\nName: {:?}\nCPU: {:.2}%\nMemory: {} KB\nStatus: {:?}",
+                    "PID: {}\nName: {:?}\nCPU: {:.2}%\nMemory: {:.2} MB\nStatus: {:?}",
                     _pid,
                     process.name(),
                     process.cpu_usage(),
-                    process.memory(),
+                    process.memory() as f64 / 1024.0 / 1024.0,
                     process.status()
                 );
             }
@@ -156,9 +171,14 @@ impl App {
         let mut rows: Vec<_> = vec![];
         for (pid, process) in self.system.processes() {
             let name = process.name().to_string_lossy().to_string();
-            let cpu = process.cpu_usage();
-            let row = vec![pid.to_string(), name, cpu.to_string()];
-
+            let user = process
+                .user_id()
+                .and_then(|uid| get_user_by_uid(**uid))
+                .map(|u| u.name().to_string_lossy().to_string())
+                .unwrap_or_default();
+            let cpu = format!("{:.1}%", process.cpu_usage());
+            let mem_mb = format!("{:.1}", process.memory() as f64 / 1024.0 / 1024.0);
+            let row = vec![pid.to_string(), name, user, cpu, mem_mb];
             // Create a row with appropriate styling based on process status
             let style = match process.status() {
                 sysinfo::ProcessStatus::Run => Style::default().fg(Color::Green),
@@ -166,13 +186,12 @@ impl App {
                 sysinfo::ProcessStatus::Zombie => Style::default().fg(Color::Red),
                 _ => Style::default(),
             };
-
             rows.push((row, style));
         }
 
         rows.sort_by(|a, b| {
-            let a_cpu = a.0[2].parse::<f32>().unwrap_or(0.0);
-            let b_cpu = b.0[2].parse::<f32>().unwrap_or(0.0);
+            let a_cpu = a.0[3].replace('%', "").parse::<f32>().unwrap_or(0.0);
+            let b_cpu = b.0[3].replace('%', "").parse::<f32>().unwrap_or(0.0);
             b_cpu.partial_cmp(&a_cpu).unwrap()
         });
 
@@ -189,13 +208,17 @@ impl App {
             [
                 Constraint::Max(10),
                 Constraint::Fill(1),
-                Constraint::Fill(1),
+                Constraint::Max(10),
+                Constraint::Max(8),
+                Constraint::Max(10),
             ],
         )
         .row_highlight_style(Style::default().bg(Color::DarkGray))
         .highlight_symbol(">>")
         .block(Block::bordered().title("Processes"))
-        .header(Row::new(vec!["PID", "Name", "CPU"]).style(Style::default().bold()));
+        .header(
+            Row::new(vec!["PID", "Name", "User", "CPU%", "MemMB"]).style(Style::default().bold()),
+        );
 
         frame.render_stateful_widget(table, area, &mut self.table_state);
     }
@@ -280,10 +303,10 @@ impl App {
                     Start Time: {}\n\
                     Run Time: {}s\n\n\
                     Memory Usage:\n\
-                    - Physical: {} KB\n\
-                    - Virtual: {} KB\n\
-                    - Read: {} bytes\n\
-                    - Written: {} bytes",
+                    - Physical: {:.2} MB\n\
+                    - Virtual: {:.2} MB\n\
+                    - Read: {:.2} MB\n\
+                    - Written: {:.2} MB",
                     pid,
                     exe,
                     cmd,
@@ -291,10 +314,10 @@ impl App {
                     status,
                     start_time,
                     run_time,
-                    memory,
-                    virtual_memory,
-                    disk_usage.read_bytes,
-                    disk_usage.written_bytes
+                    memory as f64 / 1024.0 / 1024.0,
+                    virtual_memory as f64 / 1024.0 / 1024.0,
+                    disk_usage.read_bytes as f64 / 1024.0 / 1024.0,
+                    disk_usage.written_bytes as f64 / 1024.0 / 1024.0
                 );
 
                 // Create a panel that takes up 80% of the screen width and height
